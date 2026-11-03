@@ -97,16 +97,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method 
 - Exit codes: 0 ok, 1 HTTP error (status + body on stderr), 2 network error,
   3 `.env` missing or empty. On exit code 3, stop and ask the user to fill in
   `.env` from `.env.example`; don't try to work around it.
+- The public API has **no partial-update endpoint**. Every edit is
+  GET → change locally → `PUT /workflows/:id` with the full workflow.
 - `PUT /workflows/:id` is strict (`additionalProperties: false`, `name`
-  required): send only `name`, `nodes`, `connections`, `settings` (and
-  `staticData` if needed), never the raw GET response. Inside `settings`, drop
-  `binaryMode` and `timeSavedMode` (returned by GET on recent n8n versions,
-  rejected by PUT). Build the body with a Node script, not PowerShell 5.1
-  `ConvertTo-Json` (it mangles nested JSON).
+  required, even when unchanged): send only `name`, `nodes`, `connections`,
+  `settings` (and `staticData` if needed), never the raw GET response. GET
+  returns read-only fields the PUT rejects (`id`, `versionId`,
+  `activeVersionId`, `versionCounter`, `activeVersion`, `triggerCount`,
+  `isArchived`, `shared`, ...). Inside `settings`, drop `binaryMode` and
+  `timeSavedMode` (returned by GET on recent n8n versions, rejected by PUT;
+  n8n keeps their stored values). Build the body with a Node script, not
+  PowerShell 5.1 `ConvertTo-Json` (it mangles nested JSON).
 - Retry an execution: `POST executions/{id}/retry` with body `{"loadWorkflow":true}`
   (= "Retry with currently saved workflow"). Retry resumes from the failed node
   **by name**, so renaming/removing that node breaks retries of past failures.
-- **A PUT on an active workflow publishes immediately.** Before pushing, diff
+- **A PUT on an active workflow publishes immediately** (`activeVersionId`
+  becomes the new `versionId`). Before pushing, diff
   `nodes`/`connections` against `activeVersion` so unpublished draft changes
   don't go live by accident.
 
@@ -132,7 +138,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method 
   may still be valid on the instance, so check an existing workflow there
   before downgrading anything.
 - For an up-to-date node database, build a custom image from upstream and
-  point the profile at it (`docker mcp catalog create`).
+  point the profile at it (`docker mcp catalog create`). Don't run n8n-mcp via
+  `npx` inside Claude Code's own config without the user's explicit go-ahead:
+  that would move the n8n API key into Claude Code's settings.
 
 ## Credentials policy (important)
 
