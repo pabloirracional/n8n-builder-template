@@ -4,8 +4,9 @@ Project for building and maintaining n8n workflows.
 
 ## Status
 
-Freshly set up, no workflow files yet. This file should be updated once real
-workflow JSON exports and any supporting code land in the project.
+Shareable template: it ships only `workflows/_template/` as the model to copy
+from. Once real automations land under `workflows/<slug>/`, update this section
+to describe what the project actually holds.
 
 ## Working with this project
 
@@ -44,36 +45,102 @@ workflows/
   issues, and a short change log. Keep it updated as the workflow evolves;
   it's the context Claude reads before touching that automation again.
 - `workflow.json` should stay in sync with what's actually deployed in n8n.
-  Pull the latest via the n8n MCP tools (`n8n_get_workflow`) before editing,
-  and push changes back (`n8n_update_partial_workflow` /
-  `n8n_update_full_workflow`) once verified.
+  Pull the latest via `scripts/n8n-api.ps1` (`GET workflows/<id>`) before
+  editing, and push changes back (`PUT workflows/<id>`) once verified. See
+  "Connecting to n8n" below.
 - This structure applies going forward to automations we actively build or
   touch. Existing n8n workflows are not being backfilled into this structure
   automatically. Only pull one into `workflows/` when we start working on it.
 
-## MCP connection (Docker Desktop + n8n)
+## Connecting to n8n
 
-This project talks to n8n through an MCP server run via **Docker Desktop's MCP
-Toolkit**, not through a direct API integration in this repo:
+The default is the **n8n public API, called directly** through
+`scripts/n8n-api.ps1` with the URL and key from a local `.env`. An MCP server
+(n8n-mcp via Docker Desktop) is an **optional** extra for node documentation;
+in recent tests it adds much less than it used to, so nothing in this project
+depends on it.
 
-- Docker Desktop hosts a profile with the n8n-mcp server connected to our n8n
-  instance, plus Claude Code as a client of that same gateway.
-- The n8n API URL and API key are configured as that server's connection
-  config inside Docker Desktop, not stored anywhere in this repository.
-- Once configured, Claude Code sees the n8n tools automatically as
-  `mcp__MCP_DOCKER__n8n_*` (workflow CRUD, validation, executions) plus node
-  documentation/template tools from the same n8n-mcp server. No API key ever
-  needs to be typed into Claude Code or committed to this repo. Docker holds
-  the connection, Claude just uses the tools it exposes.
-- If these tools are missing or the n8n connection looks broken, the fix is
-  in Docker Desktop's MCP Toolkit (profile/server config), not in this repo's
-  code, so check there before assuming the workflow files are the problem.
+| Channel | Status | Used for |
+|---------|--------|----------|
+| Direct API (`.env` + `scripts/n8n-api.ps1`) | **Default, required** | All reads/writes on the instance: list, get, create, update workflows; executions and retries |
+| Docker Desktop MCP Toolkit (n8n-mcp) | Optional | Node docs, properties, operations, templates, offline validation of node configs |
+
+### Direct API (`.env` + `scripts/n8n-api.ps1`)
+
+Requirements: PowerShell (Windows PowerShell 5.1 or PowerShell 7 `pwsh`) to run
+the script, and Node.js to build PUT/POST bodies.
+
+**Security rules for `.env`:**
+
+- `.env` at the repo root holds `N8N_API_URL` and `N8N_API_KEY`. The user fills
+  it in by hand from `.env.example`. It is gitignored (`.env`, `.env.*`), so it
+  is never committed.
+- **Never read, print, cat, type, grep, or edit `.env`, by any tool** (file
+  tools or shell). Only the script loads it. `.claude/settings.json` ships deny
+  rules for `Read`/`Edit`/`Write` on `.env`, but those don't cover shell
+  commands, so this rule still has to be followed.
+- Never paste the key into a command line, a body file, a workflow, or any
+  other file. The script masks the key as `***` in everything it outputs.
+
+**Usage** (paths are relative to `/api/v1`):
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method GET -Path workflows/<id> -OutFile workflows/<slug>/workflow.json
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method PUT -Path workflows/<id> -BodyFile <body.json>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method GET -Path "workflows?limit=250&excludePinnedData=true"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method POST -Path workflows -BodyFile <body.json>
+```
+
+- `-Method` accepts `GET`, `POST`, `PUT`, `PATCH`, `DELETE`. Use `pwsh` instead
+  of `powershell` on macOS/Linux. Treat `DELETE` as destructive and confirm with
+  the user first.
+- Exit codes: 0 ok, 1 HTTP error (status + body on stderr), 2 network error,
+  3 `.env` missing or empty. On exit code 3, stop and ask the user to fill in
+  `.env` from `.env.example`; don't try to work around it.
+- `PUT /workflows/:id` is strict (`additionalProperties: false`, `name`
+  required): send only `name`, `nodes`, `connections`, `settings` (and
+  `staticData` if needed), never the raw GET response. Inside `settings`, drop
+  `binaryMode` and `timeSavedMode` (returned by GET on recent n8n versions,
+  rejected by PUT). Build the body with a Node script, not PowerShell 5.1
+  `ConvertTo-Json` (it mangles nested JSON).
+- Retry an execution: `POST executions/{id}/retry` with body `{"loadWorkflow":true}`
+  (= "Retry with currently saved workflow"). Retry resumes from the failed node
+  **by name**, so renaming/removing that node breaks retries of past failures.
+- **A PUT on an active workflow publishes immediately.** Before pushing, diff
+  `nodes`/`connections` against `activeVersion` so unpublished draft changes
+  don't go live by accident.
+
+### Optional: Docker Desktop MCP Toolkit (n8n-mcp)
+
+- If configured, Docker Desktop hosts a profile with the
+  [n8n-mcp](https://github.com/czlonkowski/n8n-mcp) server, and Claude Code sees
+  its tools as `mcp__MCP_DOCKER__*`. If those tools aren't present, just work
+  from the API and existing workflows on the instance.
+- Use it only for node knowledge: `search_nodes`, `get_node_essentials`,
+  `get_node_documentation`, `search_node_properties`, `validate_node_operation`,
+  templates.
+- **Don't use its `n8n_*` tools to read or write workflows.** The Docker
+  catalog image (`mcp/n8n:latest`) lags far behind upstream n8n-mcp:
+  - it may report false `typeVersion` errors for nodes newer than its database
+    (e.g. HTTP Request `typeVersion` above what it knows);
+  - its `n8n_update_partial_workflow` fails against recent n8n with
+    `request/body must NOT have additional properties`;
+  - its `n8n_*` CRUD tools can fail with `AUTHENTICATION_ERROR` or on
+    responses over ~1 MB.
+
+  Treat its node info as a hint, not ground truth: a `typeVersion` it rejects
+  may still be valid on the instance, so check an existing workflow there
+  before downgrading anything.
+- For an up-to-date node database, build a custom image from upstream and
+  point the profile at it (`docker mcp catalog create`).
 
 ## Credentials policy (important)
 
 - **Never ask the user for API keys, tokens, or credential secrets, and never
-  write them into any file in this repo.** Credentials are configured
-  manually by the person building the automation, directly in the n8n UI.
+  write them into any file in this repo.** The only exception is the n8n API
+  key in the gitignored `.env`, which the user fills in by hand and Claude
+  never reads. Workflow credentials are configured manually by the person
+  building the automation, directly in the n8n UI.
 - Claude only ever references credentials **by the name they're saved under
   in n8n** (e.g. `"name": "Example CRM Connection"` in a node's
   `credentials` block). If a workflow needs a credential that doesn't exist
