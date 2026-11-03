@@ -13,13 +13,13 @@ The idea is for this to be a starting point: clone/copy this repository, point i
 ## How it works
 
 1. **Claude Code** is the agent that reads/edits the files in this repo.
-2. **Workflow reads/writes go straight to the n8n public API** through `scripts/n8n-api.ps1`. It loads `N8N_API_URL` and `N8N_API_KEY` from a local `.env` (never committed, never read by Claude) and masks the key in everything it prints.
+2. **By default, workflow reads/writes go straight to the n8n public API** through `scripts/n8n-api.ps1`. It loads `N8N_API_URL` and `N8N_API_KEY` from a local `.env` (never committed, never read by Claude) and masks the key in everything it prints.
 3. Each automation becomes a folder under `workflows/<slug>/`, containing:
    - `workflow.json`: the standard n8n workflow export (nodes, connections, parameters, credentials referenced by name).
    - `CLAUDE.md`: documentation for that automation, covering purpose, trigger, flow, external services, required credentials, field/ID mappings, known issues, and a change log.
 4. The root `CLAUDE.md` holds the instructions Claude Code follows automatically while working in this project (node conventions, security rules, how to sync with n8n, etc.).
 5. `.claude/agents/n8n-builder.md` defines a subagent specialized in creating/editing/debugging n8n workflow JSON, and Claude Code routes workflow-editing tasks to it.
-6. **Optional:** an MCP server ([n8n-mcp](https://github.com/czlonkowski/n8n-mcp)) via Docker Desktop's MCP Toolkit can add node documentation tools. See [Optional: n8n-mcp](#optional-n8n-mcp-via-docker).
+6. **Alternative:** instead of the script, you can connect through an MCP server ([n8n-mcp](https://github.com/czlonkowski/n8n-mcp)) in Docker Desktop's MCP Toolkit, which also reads and writes workflows and adds node documentation tools. See [Alternative: n8n-mcp via Docker](#alternative-n8n-mcp-via-docker).
 
 ## Structure
 
@@ -53,7 +53,7 @@ n8n-builder/
 ## Getting started
 
 1. Clone this repository.
-2. Copy `.env.example` to `.env` and fill in `N8N_API_URL` and `N8N_API_KEY` **yourself, in your editor**. Don't paste the key into the Claude Code chat.
+2. Default setup (direct API; for the MCP route see [Alternative](#alternative-n8n-mcp-via-docker)): copy `.env.example` to `.env` and fill in `N8N_API_URL` and `N8N_API_KEY` **yourself, in your editor**. Don't paste the key into the Claude Code chat.
 3. Check it works:
    ```
    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method GET -Path "workflows?limit=1"
@@ -77,15 +77,18 @@ n8n-builder/
 - If a workflow needs a credential that doesn't exist yet, that's flagged in the automation's `CLAUDE.md` (under "Credentials required") for you to create/assign in the n8n UI.
 - If an existing workflow has a hardcoded secret instead of a proper credential, that should be flagged, not silently fixed, since it may require coordinating a key rotation.
 
-## Optional: n8n-mcp via Docker
+## Alternative: n8n-mcp via Docker
 
-Earlier versions of this template read and wrote workflows through [n8n-mcp](https://github.com/czlonkowski/n8n-mcp) running in [Docker Desktop's MCP Toolkit](https://www.docker.com/products/mcp-toolkit/). That is no longer needed: the direct API is simpler and more reliable, and in recent tests the MCP adds much less than it used to.
+Instead of the direct API, you can connect Claude Code to n8n through [n8n-mcp](https://github.com/czlonkowski/n8n-mcp) running in [Docker Desktop's MCP Toolkit](https://www.docker.com/products/mcp-toolkit/). The n8n URL and API key go in that server's config inside Docker (not in this repo, and no `.env` needed), and Claude Code gets tools to read/write workflows plus node documentation tools (`search_nodes`, `get_node_essentials`, `validate_node_operation`, ...).
 
-You can still connect it for node documentation tools (`search_nodes`, `get_node_essentials`, `validate_node_operation`, ...). Keep in mind:
+This used to be the default. In recent tests it no longer makes as big a difference as it did, and the direct API is simpler, so the script is now the default. Things to know if you choose the MCP route:
 
-- The Docker catalog image (`mcp/n8n:latest`) lags well behind upstream, so its node database can be outdated (false `typeVersion` errors on newer nodes).
-- Its workflow CRUD tools (`n8n_*`) can fail against recent n8n versions, so this project doesn't use them for reads/writes.
-- For an up-to-date node database, build a custom image from upstream.
+- The Docker catalog image (`mcp/n8n:latest`) lags well behind upstream n8n-mcp.
+- Its `n8n_update_partial_workflow` fails against recent n8n versions; `n8n_update_full_workflow` works.
+- It may report false `typeVersion` errors on newer nodes, and its CRUD tools can fail with `AUTHENTICATION_ERROR` or on very large workflows.
+- For an up-to-date version, build a custom image from upstream and point the Docker profile at it.
+
+You can also combine both: the direct API for reads/writes and the MCP only for its node documentation tools.
 
 ## Status
 

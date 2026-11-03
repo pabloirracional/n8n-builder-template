@@ -54,18 +54,23 @@ workflows/
 
 ## Connecting to n8n
 
-The default is the **n8n public API, called directly** through
-`scripts/n8n-api.ps1` with the URL and key from a local `.env`. An MCP server
-(n8n-mcp via Docker Desktop) is an **optional** extra for node documentation;
-in recent tests it adds much less than it used to, so nothing in this project
-depends on it.
+There are two ways to connect Claude Code to n8n. Pick one per setup:
 
-| Channel | Status | Used for |
-|---------|--------|----------|
-| Direct API (`.env` + `scripts/n8n-api.ps1`) | **Default, required** | All reads/writes on the instance: list, get, create, update workflows; executions and retries |
-| Docker Desktop MCP Toolkit (n8n-mcp) | Optional | Node docs, properties, operations, templates, offline validation of node configs |
+| Option | Status | How it connects |
+|--------|--------|-----------------|
+| Direct API (`.env` + `scripts/n8n-api.ps1`) | **Default** | The script calls the n8n public API with the URL and key from a local, gitignored `.env` |
+| Docker Desktop MCP Toolkit (n8n-mcp) | Alternative | An n8n-mcp server in Docker holds the URL and key and exposes `mcp__MCP_DOCKER__*` tools to Claude Code |
 
-### Direct API (`.env` + `scripts/n8n-api.ps1`)
+Both cover the full job: list, get, create and update workflows, executions.
+n8n-mcp also adds node documentation tools; in recent tests that no longer
+makes as big a difference as it used to, which is why the direct API is now
+the default.
+
+Which one to use: if the user set up `.env`, use the direct API. If the
+`mcp__MCP_DOCKER__n8n_*` tools are available and the user chose the MCP
+route, use them. Don't mix both for writes on the same workflow in one task.
+
+### Option 1 (default): Direct API (`.env` + `scripts/n8n-api.ps1`)
 
 Requirements: PowerShell (Windows PowerShell 5.1 or PowerShell 7 `pwsh`) to run
 the script, and Node.js to build PUT/POST bodies.
@@ -116,38 +121,44 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method 
   `nodes`/`connections` against `activeVersion` so unpublished draft changes
   don't go live by accident.
 
-### Optional: Docker Desktop MCP Toolkit (n8n-mcp)
+### Option 2 (alternative): Docker Desktop MCP Toolkit (n8n-mcp)
 
-- If configured, Docker Desktop hosts a profile with the
-  [n8n-mcp](https://github.com/czlonkowski/n8n-mcp) server, and Claude Code sees
-  its tools as `mcp__MCP_DOCKER__*`. If those tools aren't present, just work
-  from the API and existing workflows on the instance.
-- Use it only for node knowledge: `search_nodes`, `get_node_essentials`,
-  `get_node_documentation`, `search_node_properties`, `validate_node_operation`,
-  templates.
-- **Don't use its `n8n_*` tools to read or write workflows.** The Docker
-  catalog image (`mcp/n8n:latest`) lags far behind upstream n8n-mcp:
+- Docker Desktop hosts a profile with the
+  [n8n-mcp](https://github.com/czlonkowski/n8n-mcp) server connected to the n8n
+  instance, plus Claude Code as a client of that same gateway. The n8n API URL
+  and key live in that server's config inside Docker, not in this repo.
+- Claude Code sees its tools as `mcp__MCP_DOCKER__*`: workflow CRUD and
+  executions (`n8n_get_workflow`, `n8n_update_full_workflow`, ...) plus node
+  knowledge (`search_nodes`, `get_node_essentials`, `get_node_documentation`,
+  `search_node_properties`, `validate_node_operation`, templates). The node
+  tools can also be used alongside Option 1 for lookups.
+- **Known limitations of the Docker catalog image** (`mcp/n8n:latest`, which
+  lags far behind upstream n8n-mcp):
+  - `n8n_update_partial_workflow` fails against recent n8n with
+    `request/body must NOT have additional properties`. Use
+    `n8n_update_full_workflow` instead (it requires `name` even when
+    unchanged);
   - it may report false `typeVersion` errors for nodes newer than its database
-    (e.g. HTTP Request `typeVersion` above what it knows);
-  - its `n8n_update_partial_workflow` fails against recent n8n with
-    `request/body must NOT have additional properties`;
-  - its `n8n_*` CRUD tools can fail with `AUTHENTICATION_ERROR` or on
-    responses over ~1 MB.
-
-  Treat its node info as a hint, not ground truth: a `typeVersion` it rejects
-  may still be valid on the instance, so check an existing workflow there
-  before downgrading anything.
-- For an up-to-date node database, build a custom image from upstream and
-  point the profile at it (`docker mcp catalog create`). Don't run n8n-mcp via
-  `npx` inside Claude Code's own config without the user's explicit go-ahead:
-  that would move the n8n API key into Claude Code's settings.
+    (e.g. HTTP Request `typeVersion` above what it knows). A `typeVersion` it
+    rejects may still be valid on the instance, so check an existing workflow
+    there before downgrading anything;
+  - its CRUD tools can fail with `AUTHENTICATION_ERROR` or on responses over
+    ~1 MB. If that happens, the fix is in Docker Desktop's MCP Toolkit config,
+    or switch to Option 1.
+- For an up-to-date n8n-mcp, build a custom image from upstream and point the
+  profile at it (`docker mcp catalog create`), which keeps the API key inside
+  Docker. Don't run n8n-mcp via `npx` inside Claude Code's own config without
+  the user's explicit go-ahead: that would move the n8n API key into Claude
+  Code's settings.
+- The same rules from Option 1 still apply: a write on an active workflow
+  publishes immediately, and retries resume from the failed node by name.
 
 ## Credentials policy (important)
 
 - **Never ask the user for API keys, tokens, or credential secrets, and never
   write them into any file in this repo.** The only exception is the n8n API
-  key in the gitignored `.env`, which the user fills in by hand and Claude
-  never reads. Workflow credentials are configured manually by the person
+  key in the gitignored `.env` (Option 1), which the user fills in by hand and
+  Claude never reads; with Option 2 the key lives in Docker instead. Workflow credentials are configured manually by the person
   building the automation, directly in the n8n UI.
 - Claude only ever references credentials **by the name they're saved under
   in n8n** (e.g. `"name": "Example CRM Connection"` in a node's
