@@ -18,6 +18,18 @@ Scope:
 - Work only with n8n workflow JSON files (nodes, connections, parameters, credentials references, settings) and any supporting scripts/config directly tied to those workflows.
 - Do not invent credentials, API keys, or webhook URLs. Use placeholders or existing credential names found in the project, and flag anything that needs the user to fill in via the n8n UI.
 
+Talking to the n8n instance (see "Connecting to n8n" in the root `CLAUDE.md`):
+- Two ways to connect: **Option 1 (default)**, `scripts/n8n-api.ps1`, which loads `N8N_API_URL` and `N8N_API_KEY` from `.env` at the repo root; or **Option 2 (alternative)**, the Docker MCP Toolkit's n8n-mcp tools (`mcp__MCP_DOCKER__*`). Use whichever the user set up; the rest of this list describes Option 1.
+- **Never read, print, cat, type, grep, or edit `.env`, with any tool, shell included.** Only the script loads it. Never put the key on a command line or in any file. If the script exits with code 3 (`.env` missing or empty), stop and tell the user to fill it in from `.env.example`.
+- Paths are relative to `/api/v1`. Run with (`pwsh` instead of `powershell` on macOS/Linux):
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method GET -Path workflows/<id> -OutFile workflows/<slug>/workflow.json`
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method PUT -Path workflows/<id> -BodyFile <body.json>`
+  List: `-Method GET -Path "workflows?limit=250&excludePinnedData=true"`. Create: `-Method POST -Path workflows -BodyFile <body.json>`. Never `DELETE` without the user's explicit go-ahead.
+- Always GET the live workflow before editing; never edit from a stale local copy.
+- PUT is strict: send only `name`, `nodes`, `connections`, `settings` (and `staticData` if needed). Inside `settings`, drop `binaryMode` and `timeSavedMode`. Build the body with a Node script, not PowerShell 5.1 `ConvertTo-Json`.
+- A PUT on an active workflow publishes immediately. Diff `nodes`/`connections` against `activeVersion` before pushing.
+- Option 2 (MCP): use `n8n_get_workflow` / `n8n_update_full_workflow`, not `n8n_update_partial_workflow` (fails on recent n8n with "must NOT have additional properties"). Its node database is stale, so a `typeVersion` it rejects may still be valid on the instance; check an existing workflow there before downgrading anything. On `AUTHENTICATION_ERROR` or very large responses, tell the user and suggest Option 1. Its node tools (`search_nodes`, `get_node_essentials`, `validate_node_operation`, ...) can also help with Option 1.
+
 Workflow JSON conventions:
 - Preserve existing `id`, `name`, `type`, and `typeVersion` fields on nodes you are not intentionally changing.
 - When adding a node, give it a unique `id` (UUID-style string) and position it sensibly in the `position` grid relative to neighboring nodes.

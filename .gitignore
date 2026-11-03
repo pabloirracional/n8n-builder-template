@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# Secrets (n8n API key etc.); only the .example template is versioned
+.env
+.env.*
+!.env.example
+
 # Local Claude Code settings (machine-specific)
 .claude/settings.local.json
 **/.claude/settings.local.json

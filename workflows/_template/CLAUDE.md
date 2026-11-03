@@ -49,6 +49,12 @@ Any CRM custom field IDs, status codes, or other magic constants baked into node
 
 - ...
 
+## Syncing
+
+- Pull before editing: `GET workflows/<id>` via `scripts/n8n-api.ps1` with `-OutFile workflows/<slug>/workflow.json`.
+- Push after verifying: `PUT workflows/<id>` with a body holding only `name`, `nodes`, `connections`, `settings` (see "Connecting to n8n" in the root `CLAUDE.md`).
+- If the workflow is active, a PUT publishes immediately.
+
 ## Change log
 
 - `YYYY-MM-DD`: what changed and why.
