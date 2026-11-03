@@ -8,15 +8,46 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\n8n-api.ps1 -Method PUT -Path workflows/<workflow-id> -BodyFile body.json
 
 .NOTES
-  Exit codes: 0 ok, 1 HTTP error (status + body on stderr), 2 network error, 3 .env missing or empty.
+  Exit codes: 0 ok, 1 HTTP error (status + body on stderr), 2 network error, 3 .env missing or empty,
+  4 usage/local error (bad or missing argument, -BodyFile not found, -OutFile can't be written).
+  Usage errors are checked before .env is read, and nothing is sent to n8n.
 #>
+[CmdletBinding(PositionalBinding = $false)]
 param(
-  [Parameter(Mandatory)][ValidateSet('GET', 'POST', 'PUT', 'PATCH', 'DELETE')][string]$Method,
-  [Parameter(Mandatory)][string]$Path,
+  [string]$Method,
+  [string]$Path,
   [string]$BodyFile,
-  [string]$OutFile
+  [string]$OutFile,
+  [Parameter(ValueFromRemainingArguments)][string[]]$Rest
 )
 $ErrorActionPreference = 'Stop'
+
+# Usage checks: exit 4 with a short message instead of a PowerShell error or an interactive prompt.
+function Exit-Usage([string]$msg) {
+  [Console]::Error.WriteLine("Usage error: $msg")
+  [Console]::Error.WriteLine('Usage: n8n-api.ps1 -Method GET|POST|PUT|PATCH|DELETE -Path <path under /api/v1> [-BodyFile <json>] [-OutFile <file>]')
+  exit 4
+}
+function Get-FullPath([string]$p) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($p) }
+
+if ($Rest) { Exit-Usage "unexpected argument(s): $($Rest -join ' ')" }
+if (-not $Method) { Exit-Usage '-Method is required' }
+$Method = $Method.ToUpperInvariant()
+if (@('GET', 'POST', 'PUT', 'PATCH', 'DELETE') -notcontains $Method) { Exit-Usage "invalid -Method '$Method'" }
+if (-not $Path) { Exit-Usage '-Path is required' }
+if ($BodyFile) {
+  $bodyPath = Get-FullPath $BodyFile
+  if (-not (Test-Path -LiteralPath $bodyPath -PathType Leaf)) { Exit-Usage "-BodyFile not found: $BodyFile" }
+}
+if ($OutFile) {
+  $outPath = Get-FullPath $OutFile
+  if (Test-Path -LiteralPath $outPath -PathType Container) { Exit-Usage "-OutFile is a folder, expected a file path: $OutFile" }
+  $outDir = Split-Path -Parent $outPath
+  if ($outDir -and -not (Test-Path -LiteralPath $outDir -PathType Container)) {
+    try { New-Item -ItemType Directory -Path $outDir -Force -ErrorAction Stop | Out-Null } catch { }
+    if (-not (Test-Path -LiteralPath $outDir -PathType Container)) { Exit-Usage "cannot create folder for -OutFile: $outDir" }
+  }
+}
 
 $envFile = Join-Path $PSScriptRoot '..\.env'
 if (-not (Test-Path $envFile)) { [Console]::Error.WriteLine('.env not found at the repo root'); exit 3 }
@@ -41,7 +72,8 @@ $req = New-Object System.Net.Http.HttpRequestMessage ([System.Net.Http.HttpMetho
 $req.Headers.Add('X-N8N-API-KEY', $key)
 $req.Headers.Add('Accept', 'application/json')
 if ($BodyFile) {
-  $body = [IO.File]::ReadAllText((Resolve-Path $BodyFile), [Text.Encoding]::UTF8)
+  try { $body = [IO.File]::ReadAllText($bodyPath, [Text.Encoding]::UTF8) }
+  catch { Exit-Usage "cannot read -BodyFile: $BodyFile" }
   $req.Content = New-Object System.Net.Http.StringContent($body, [Text.Encoding]::UTF8, 'application/json')
 }
 
@@ -65,8 +97,11 @@ if (-not $resp.IsSuccessStatusCode) {
   exit 1
 }
 if ($OutFile) {
-  $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile)
-  [IO.File]::WriteAllText($full, $text, (New-Object Text.UTF8Encoding $false))
+  try { [IO.File]::WriteAllText($outPath, $text, (New-Object Text.UTF8Encoding $false)) }
+  catch {
+    [Console]::Error.WriteLine("Request succeeded (HTTP $status) but -OutFile could not be written: $OutFile")
+    exit 4
+  }
   Write-Output "HTTP $status -> $OutFile ($($bytes.Length) bytes)"
 } else {
   Write-Output $text
