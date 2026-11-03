@@ -100,8 +100,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method 
   of `powershell` on macOS/Linux. Treat `DELETE` as destructive and confirm with
   the user first.
 - Exit codes: 0 ok, 1 HTTP error (status + body on stderr), 2 network error,
-  3 `.env` missing or empty. On exit code 3, stop and ask the user to fill in
-  `.env` from `.env.example`; don't try to work around it.
+  3 `.env` missing or empty, 4 usage/local error (bad or missing argument,
+  `-BodyFile` not found, `-OutFile` can't be written). On exit code 3, stop and
+  ask the user to fill in `.env` from `.env.example`; don't try to work around
+  it. On exit code 4, fix the command; except for an `-OutFile` write failure,
+  nothing was sent to n8n.
+- `-OutFile` creates its parent folder if needed (e.g. a new
+  `workflows/<slug>/`).
 - The public API has **no partial-update endpoint**. Every edit is
   GET → change locally → `PUT /workflows/:id` with the full workflow.
 - `PUT /workflows/:id` is strict (`additionalProperties: false`, `name`

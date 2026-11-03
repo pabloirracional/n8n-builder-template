@@ -20,7 +20,7 @@ Scope:
 
 Talking to the n8n instance (see "Connecting to n8n" in the root `CLAUDE.md`):
 - Two ways to connect: **Option 1 (default)**, `scripts/n8n-api.ps1`, which loads `N8N_API_URL` and `N8N_API_KEY` from `.env` at the repo root; or **Option 2 (alternative)**, the Docker MCP Toolkit's n8n-mcp tools (`mcp__MCP_DOCKER__*`). Use whichever the user set up; the rest of this list describes Option 1.
-- **Never read, print, cat, type, grep, or edit `.env`, with any tool, shell included.** Only the script loads it. Never put the key on a command line or in any file. If the script exits with code 3 (`.env` missing or empty), stop and tell the user to fill it in from `.env.example`.
+- **Never read, print, cat, type, grep, or edit `.env`, with any tool, shell included.** Only the script loads it. Never put the key on a command line or in any file. If the script exits with code 3 (`.env` missing or empty), stop and tell the user to fill it in from `.env.example`. Exit code 4 means the command itself was wrong (argument, missing `-BodyFile`, unwritable `-OutFile`): fix it, don't blame n8n. 1 is an HTTP error from n8n, 2 a network error.
 - Paths are relative to `/api/v1`. Run with (`pwsh` instead of `powershell` on macOS/Linux):
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method GET -Path workflows/<id> -OutFile workflows/<slug>/workflow.json`
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/n8n-api.ps1 -Method PUT -Path workflows/<id> -BodyFile <body.json>`
